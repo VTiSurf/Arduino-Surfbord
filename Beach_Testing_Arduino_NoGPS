@@ -1,0 +1,422 @@
+#include <SD.h>
+#include <SPI.h>
+#include <FreeSixIMU.h>
+#include <FIMU_ADXL345.h>
+#include <FIMU_ITG3200.h>
+#include <Wire.h>
+#include <SoftwareSerial.h>
+
+//define constants (Select Pins for SPI and digital pins to use)
+const int trimPot1SSP = 53;  //slave select pin for digital trim pot 1(channels 1-6)
+const int trimPot2SSP = 49;  //slave select pin for digital trim pot 2(channels 7-12)
+const int trimPot3SSP = 47;  //slave select pin for digital trim pot 3(channel 13)
+
+SoftwareSerial mySerial ( 18 , 19 );
+
+const int mux1EnablePin = 26;  //pin for #1 Mux
+const int mux2EnablePin = 27;  //pin for #2 Mux
+const int SDCardSSP = 45;  //slave select pin for 
+
+const int a1Pin = 24;  
+const int b1Pin = 22;
+const int c1Pin = 36;
+const int a2Pin = 37;
+const int b2Pin = 39;
+const int c2Pin = 35;
+
+const int debug1 = 25;
+
+
+int muxCounter = 1;
+int muxNu = 1;
+
+double sensorValues[13];
+
+int channelLevels[13] = {50,50,50,50,50,50,50,50,50,50,50,50,60};
+
+int iteration = 1;
+double channelMuxRead[13];
+
+//create variables to control program flow. These are used to implement the dual buffer system
+int numberSaved = 0;
+boolean buffer1Full = false;
+boolean buffer2Full = false;
+int numberDone = 0;
+int timerCounter = 0;
+
+const int numberToDo = 38;
+int totalNumberToDo = 0;
+int channelTestCounter = 0;
+boolean hasDoneTwoTests = false;
+
+//RTC variables
+int startDay = 20;
+int startMonth = 3;
+int startHour = 3;
+int startMinute = 6;
+
+//File names
+char fileName[] = "00000000.txt";
+char headerFileName[] = "00000000.txt";
+
+//accel/gyro
+float angles[3]; // yaw pitch roll
+
+// Set the FreeSixIMU object
+FreeSixIMU sixDOF = FreeSixIMU();
+
+//Setup runs once and initializes the necessary components for data collection
+void setup() 
+  {
+    Serial.begin(9600);
+    mySerial.begin( 115200);
+    Serial.println("Initializing Card");
+    //set necessary pins as outputs
+    pinMode(trimPot1SSP, OUTPUT);
+    pinMode(trimPot2SSP, OUTPUT);
+    pinMode(trimPot3SSP, OUTPUT);
+    pinMode(SDCardSSP, OUTPUT);
+    pinMode(debug1, OUTPUT);
+    pinMode(23, OUTPUT);
+    pinMode(31, OUTPUT);
+    pinMode(33, OUTPUT);
+    pinMode(35, OUTPUT);
+    pinMode(27, OUTPUT);
+    pinMode(26, OUTPUT);
+    pinMode(24, OUTPUT);
+    pinMode(22, OUTPUT);
+    pinMode(36, OUTPUT);
+    pinMode(37, OUTPUT);
+    pinMode(39, OUTPUT);
+
+  
+    //ensure that muxes are not connected to the circuit
+    digitalWrite(26, LOW);    //EN1
+    digitalWrite(27, LOW);    //EN2
+  
+    if (!SD.begin(SDCardSSP))            //Checking the SD card is working or not
+    {
+      Serial.println("Card Fail");       //Outputing Card Fail when the arduino can't find the SD card
+      return;
+    }    
+    Serial.println ("Card Ready");  
+    
+    balance ();                          //Balancing all the channels before recording the data
+    //shuntCal();                          //Calibrating the voltage using multiplexor 
+    Serial.println ("Finished Calibration");
+    
+  Wire.begin();
+  
+  delay(5);
+  sixDOF.init(); //begin the IMU
+  delay(5);
+    
+  }
+  
+ void loop ()                           //The loop will continue to run. It runs every 0.1 sec to record all voltage data from all 13 channels 
+  {
+    File dataFile = SD.open("Data.txt", FILE_WRITE);              //It opens the Data.txt file. if it doesn't exist, it creates one.
+    if (dataFile)                                                 //If the file opens, it runs the loop
+    {
+      for( int i=0; i<13; i++)                                    // the loop runs 13 times for each channels.
+      {
+        dataFile.print(analogRead(i)*0.0049,DEC);                 // it write the voltage reading to the SD card
+        dataFile.print(",");    
+      }
+        dataFile.println(" ");
+        dataFile.print(angles[0]); //changed from here
+        dataFile.print(" | ");  
+        dataFile.print(angles[1]);
+        dataFile.print(" | ");
+        dataFile.print(angles[2]);  //to here
+    }                                                             //Out put the error if the SD card doesn't work
+    else
+    {
+      Serial.println ("Couldn't access file");
+    }
+    dataFile.println (" ");                                        //formating for the datafile on the SD card.
+    dataFile.close();                                              //close the data file
+    delay(100);     //the loop has a 0.1 second deay.
+    
+         sixDOF.getEuler(angles);
+  
+           if (angles[0]>0){
+  if (abs(angles[0])<10){
+    mySerial.print(angles[0]);
+    mySerial.print("   ");
+  }
+  else if (abs(angles[0])<100){
+    mySerial.print(angles[0]);
+    mySerial.print("  ");
+  }
+  else{
+  mySerial.print(angles[0]);
+  mySerial.print(" ");
+  
+  } 
+           }
+           else{
+             if (abs(angles[0])<10){
+    mySerial.print(angles[0]);
+    mySerial.print("  ");
+  }
+  else if (abs(angles[0])<100){
+    mySerial.print(angles[0]);
+    mySerial.print(" ");
+  }
+  else{
+    mySerial.print(angles[0]);
+  }
+           }
+             
+    
+    if (angles[2]>0){
+  if (abs(angles[2])<10){
+    mySerial.print("|");
+    mySerial.print(angles[2]);
+    mySerial.print("   ");
+  }
+  else if (abs(angles[2])<100){
+    mySerial.print("|");
+    mySerial.print(angles[2]);
+    mySerial.print("  ");
+  }
+  else{
+    mySerial.print("|");
+  mySerial.print(angles[2]);
+  mySerial.print(" ");
+  } 
+           }
+           else{
+             if (abs(angles[2])<10){
+    mySerial.print("|");
+    mySerial.print(angles[2]);
+    mySerial.print("  ");
+  }
+  else if (abs(angles[2])<100){
+    mySerial.print("|");
+    mySerial.print(angles[2]);
+    mySerial.print(" ");
+  }
+  else{
+    mySerial.print("|");
+    mySerial.print(angles[2]);
+  }
+           }
+  
+  if (angles[1]>0){
+  if (abs(angles[1])<10){
+    mySerial.print("|");
+    mySerial.print(angles[1]);
+    mySerial.print("   ");
+  }
+  else if (abs(angles[1])<100){
+    mySerial.print("|");
+    mySerial.print(angles[1]);
+    mySerial.print("  ");
+  }
+  else{
+    mySerial.print("|");
+  mySerial.print(angles[1]);
+  mySerial.print(" ");
+  } 
+           }
+           else{
+             if (abs(angles[1])<10){
+    mySerial.print("|");
+    mySerial.print(angles[1]);
+    mySerial.print("  ");
+  }
+  else if (abs(angles[1])<100){
+    mySerial.print("|");
+    mySerial.print(angles[1]);
+    mySerial.print(" ");
+  }
+  else{
+    mySerial.print("|");
+    mySerial.print(angles[1]);
+  }
+         }
+    
+     for (int i = 0; i < 6; i++)
+      {
+        //mySerial.print ("Channnel ");
+        mySerial.print ("(");
+        mySerial.print (i+1);
+        mySerial.print (") ");
+        sensorValues[i] = analogRead(i)*0.0048828;  //converts analog read value to volts
+        mySerial.print(sensorValues[i], DEC);  //prints to arduino serial view (used for debugging)
+        mySerial.println (",");
+    }
+    mySerial.print ("(");
+        mySerial.print (7);
+        mySerial.print (") ");
+    mySerial.print("2.5000000000");
+    mySerial.println (",");
+     for (int i = 7; i < 13; i++)
+      {
+        //mySerial.print ("Channnel ");
+        mySerial.print ("(");
+        mySerial.print (i+1);
+        mySerial.print (") ");
+        sensorValues[i] = analogRead(i)*0.0048828;  //converts analog read value to volts
+        mySerial.print(sensorValues[i], DEC);  //prints to arduino serial view (used for debugging)
+        mySerial.println (",");
+    }
+  
+  delay(100); 
+  }
+  
+  
+int digitalPotWrite(int address, int value, int slaveSelectPin) 
+      {
+        digitalWrite(slaveSelectPin,LOW);
+        SPI.transfer(address);
+        SPI.transfer(value);
+        digitalWrite(slaveSelectPin,HIGH);
+      }
+
+   void balance()    // Auto balaning function using the binary search
+      {
+        //Turns LEDs on to verify during actual use
+        digitalWrite(35, HIGH);
+        digitalWrite(37, HIGH);
+        for(int i = 0; i < 13; i++)               // It balances all 13 channels
+        {
+          int binstart = 0;                       // The start point of the array search
+          int binend = 256;                       // The end point of the array search. Trimpot has 256 setting 
+          int binmid;                             // The mid point of the array which will be the input level for the trimpot level
+          int searchswitch = 1;                   // The switch to exit out the search. when it is equal to zero, it stop the while loop
+          while ((binstart <= binend) && (searchswitch == 1))                 // the while loop will run only when the switch is on and the array still has a size that is 
+          {                                                                   // greater than 2.
+            binmid = (binstart + binend)/ 2;            
+            channelLevels[i] = binmid;                                        // Set the trimpot level to be the mid point of the array
+  
+            
+            if ( i < 6)
+            { digitalPotWrite (i, channelLevels[i], trimPot1SSP);}            // Deliver the trimpot level to the actually trimpot chip (for channel 1-6)
+            else if ( i < 12)
+            { digitalPotWrite (i-6, channelLevels[i], trimPot2SSP);}            // Deliver the trimpot level to the actually trimpot chip (for channel 7-12)
+            else
+            { digitalPotWrite (0, channelLevels[i], trimPot3SSP);}            // Deliver the trimpot level to the actually trimpot chip (for channel 13)
+            
+            delay(100);                                                       // Allow the voltage to change due to the change in circuit resistance
+            sensorValues[i] = analogRead(i)*0.0049;                           // Store the voltage read into sensorValue array
+            Serial.print(i+1,DEC);                                            // Output the current voltage, trimpotlevel on the screen 
+            Serial.print(" ");
+            Serial.print(sensorValues[i], DEC);
+            Serial.print(" ");
+            Serial.println(channelLevels[i], DEC);             
+                       
+            if ( (sensorValues[i] > 2.49) && (sensorValues[i] < 2.51) )       // If the voltage is within 0.5 volt range, it stops the while loop
+            {
+              searchswitch = 0;
+            }
+            else if ( 2.5 > sensorValues[i])                                  // if the voltage is greater than 2.5 (desire voltage), it will continue to 
+            { binend = binmid-1; }                                            // search the left side of the array
+            else                                                              // otherwise it search the right side
+            { binstart= binmid + 1; }              
+          }
+          delay (100);                                                       // 0.1 sec delay before moving to the next strain gauge
+        }       
+  
+        
+        // It outputs the voltage for all channels once it finishes balance
+      
+        for(int i = 0; i < 13; i++)
+          {
+              Serial.print(i+1, DEC);
+              Serial.print(" ");
+              Serial.print(sensorValues[i], DEC);
+              Serial.print(" ");
+              Serial.println(channelLevels[i], DEC);
+   
+          }   
+          
+          digitalWrite(35, LOW);
+          digitalWrite(37, LOW);
+       } 
+      
+
+
+void shuntCal()                                                      //Function to write the calibration data on the SD card
+      {
+        File CalFile = SD.open("DataCal.txt",FILE_WRITE);            //The data will be stored in DataCal.txt
+        if (CalFile)                                                 //the function will only run when the SD card is ready
+       { 
+        digitalWrite(31,HIGH);                                       // LED light will be turn on while the function is runing
+        digitalWrite(33,HIGH);
+        for(int i=0; i<13; i++)                                      // Loop to calibrate all 13 channels
+        {
+          CalFile.print (analogRead(i)*0.0049,DEC);                  // Writing the voltage value to the SD card before the mux is connected 
+          CalFile.print (",");
+          delay(100);
+          MuxOn (i);
+          CalFile.println (analogRead(i)*0.0049,DEC);                // Writing the voltage value to the SD card after the mux is connected 
+          delay(100);          
+        }
+        CalFile.close();                                             // Close the data file
+        MuxOff ();                                                   // disconnect the mux
+        digitalWrite (31,LOW);                                       //turn off the LED lights
+        digitalWrite (33,LOW);
+       }
+       else
+       {
+         Serial.println ("Couldn't access shuntCal");
+       }
+      }
+
+  int MuxOn (int ShuntChannel)                                                    // Function to connect the muti mux to input channel 
+       {
+         if (ShuntChannel < 8 )                                                   // Channel 0 ~ 7 for mux number 1
+          {
+              digitalWrite (mux1EnablePin,LOW);                                   // Turn on the mux
+              int a1,b1,c1=0;                                                     // Convert the channel number to binary system
+              a1 = ShuntChannel % 2 ;
+              ShuntChannel = ShuntChannel/2;
+              b1 = ShuntChannel % 2 ;
+              ShuntChannel = ShuntChannel/2;
+              c1 = ShuntChannel % 2 ;
+              if (a1 == 0)                                                        // Conmunication with the mux to connect the 1 M resistor to desire channel 
+                { digitalWrite (a1Pin,LOW);   }
+              else 
+                {  digitalWrite (a1Pin,HIGH);  }
+              if (b1 == 0)
+                {  digitalWrite (b1Pin,LOW);  }
+              else
+                {  digitalWrite (b1Pin,HIGH);  }
+              if (c1 == 0 )
+                {  digitalWrite (c1Pin,LOW);  }
+              else 
+                {  digitalWrite (c1Pin,HIGH);  }                 
+          }
+          else                                                                  // channel 8~12 for mux number 2
+          {
+              digitalWrite (mux2EnablePin,LOW);                                // Turn on the mux
+              int a2,b2,c2=0;
+              ShuntChannel=ShuntChannel - 8;                                   // Convert channel number to binary system
+              a2 = ShuntChannel % 2 ;
+              ShuntChannel = ShuntChannel/2;
+              b2 = ShuntChannel % 2 ;
+              ShuntChannel = ShuntChannel/2;
+              c2 = ShuntChannel % 2 ;
+              if (a2 == 0)                                                     // Conmunication with the mux to connect the 1 M resistor to desire channel 
+                { digitalWrite (a2Pin,LOW);   }
+              else 
+                {  digitalWrite (a2Pin,HIGH);  }
+              if (b2 == 0)
+                {  digitalWrite (b2Pin,LOW);  }
+              else
+                {  digitalWrite (b2Pin,HIGH);  }
+              if (c2 == 0 )
+                {  digitalWrite (c2Pin,LOW);  }
+              else 
+                {  digitalWrite (c2Pin,HIGH);  }                    
+          }             
+       }
+       
+  void MuxOff ()                                                            //disconnet Mux to the circuit
+       {
+          digitalWrite(26, HIGH);
+          digitalWrite(27, HIGH);       
+       }
